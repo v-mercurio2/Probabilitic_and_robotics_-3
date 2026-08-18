@@ -186,7 +186,7 @@ def compute_absolute_trajectory_rmse(aligned_poses, gt_poses_dict):
     errs = np.array(errs)
     return float(np.sqrt(np.mean(errs**2)))
 
-def plot_results(optimized_poses, gt_poses_dict, optimized_map, world_map, odom_poses_dict=None):
+def plot_results(optimized_poses, gt_poses_dict, optimized_map, world_map, odom_poses_dict=None, save_path="slam_results.png"):
     """
     Draws the 2D map (top view) with the trajectory and landmarks.
     The estimated trajectory is first rigidly aligned in SE(2) to the GT
@@ -237,6 +237,9 @@ def plot_results(optimized_poses, gt_poses_dict, optimized_map, world_map, odom_
     plt.legend()
     plt.grid(True)
     plt.axis('equal')
+    if save_path is not None:
+        plt.savefig(save_path, dpi=300)
+        print(f"   -> Results plot saved as: {save_path}")
     plt.show()
 
 def compute_reprojection_stats(poses_dict, points_dict, measurements, K, cam_transform):

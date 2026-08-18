@@ -71,7 +71,8 @@ def main():
     gt_poses_dict,
     optimized_map,
     dataset['world_map'],
-    odom_poses_dict=odom_poses_dict
+    odom_poses_dict=odom_poses_dict,
+    save_path="slam_results.png"
 )
 
 if __name__ == "__main__":

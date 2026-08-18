@@ -4,6 +4,7 @@ import geometry_utils
 import data_parser
 from scipy.sparse import lil_matrix
 import frontend
+import matplotlib.pyplot as plt
 
 def pack_state(delta_poses_dict, points_dict):
     """
@@ -308,6 +309,14 @@ def run_bundle_adjustment(dataset, initial_map):
         verbose=2,
         max_nfev=300
     )
+
+    plt.figure(figsize=(10, 12))
+    plt.spy(jac_sparsity, markersize=0.5, color='darkblue', aspect='auto') # markersize più piccolo e aspect auto
+    plt.title("Jacobian Sparsity Structure (Bundle Adjustment)")
+    plt.xlabel("State Parameters (Poses + Landmarks)")
+    plt.ylabel("Residuals (Odom + Reprojection)")
+    plt.tight_layout()
+    plt.savefig("sparsity_pattern.png", dpi=300) # Alta risoluzione
     
     print("\n   -> End optimization!")
 
@@ -324,12 +333,11 @@ def run_bundle_adjustment(dataset, initial_map):
         measurements,
         camera_params['K'],
         camera_params['transform'],
-        max_mean_reproj_error=10.0, 
+        max_mean_reproj_error=15.0, 
         min_valid_obs=2,
-        max_distance=15.0
+        max_distance=25.0
     )
 
     print(f"   -> Landmarks after quality filter: {len(filtered_map)} / {len(optimized_map)}")
 
     return optimized_poses, filtered_map
-
