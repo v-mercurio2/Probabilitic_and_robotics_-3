@@ -199,16 +199,29 @@ def build_sparsity_matrix(pose_keys, point_keys, measurements, odom_constraints,
     return A
 
 def filter_bad_landmarks(optimized_poses, optimized_map, measurements, K, cam_transform,
-                         max_mean_reproj_error=10.0, min_valid_obs=2, max_distance=20.0):
+                         max_mean_reproj_error=55.0,
+                         min_valid_obs=1,
+                         max_distance=45.0):
     """
-    It only keeps landmarks that:
-    - are not too far from the origin,
-    - have at least min_valid_obs valid observations with positive depth,
-    - have average reprojection error below the threshold.
+    Conservative post-optimization landmark filtering.
+
+    Since this is a SLAM project, the mapping component should preserve most of
+    the reconstructed landmarks. Therefore, this filter removes only landmarks
+    that are numerically invalid, geometrically implausible, or have a very high
+    mean reprojection error.
+
+    The goal is not to obtain the densest possible map at any cost, but to avoid
+    rejecting too many landmarks while keeping the trajectory estimation stable.
     """
     filtered_map = {}
 
     for pt_id, pt_3d in optimized_map.items():
+
+        # Reject numerical failures
+        if not np.all(np.isfinite(pt_3d)):
+            continue
+
+        # Reject only clearly implausible landmarks
         if np.linalg.norm(pt_3d) > max_distance:
             continue
 
@@ -231,7 +244,10 @@ def filter_bad_landmarks(optimized_poses, optimized_map, measurements, K, cam_tr
 
             Xh = np.append(pt_3d, 1.0)
             proj = P @ Xh
-            if proj[2] <= 1e-6:
+
+            # Invalid projections are ignored for the statistics,
+            # but the landmark is not immediately discarded.
+            if proj[2] <= 1e-8:
                 continue
 
             uv = proj[:2] / proj[2]
@@ -242,8 +258,10 @@ def filter_bad_landmarks(optimized_poses, optimized_map, measurements, K, cam_tr
                 errors.append(err)
                 valid_obs += 1
 
+        # Keep landmarks with at least one valid reprojection and acceptable average error
         if valid_obs >= min_valid_obs and len(errors) > 0:
             mean_err = np.mean(errors)
+
             if mean_err <= max_mean_reproj_error:
                 filtered_map[pt_id] = pt_3d
 
@@ -333,9 +351,9 @@ def run_bundle_adjustment(dataset, initial_map):
         measurements,
         camera_params['K'],
         camera_params['transform'],
-        max_mean_reproj_error=15.0, 
-        min_valid_obs=2,
-        max_distance=25.0
+        max_mean_reproj_error=45.0,
+        min_valid_obs=1,
+        max_distance=45.0
     )
 
     print(f"   -> Landmarks after quality filter: {len(filtered_map)} / {len(optimized_map)}")

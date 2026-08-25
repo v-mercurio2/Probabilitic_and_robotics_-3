@@ -343,13 +343,18 @@ This confirms the expected Bundle Adjustment structure: each visual residual aff
 
 After Bundle Adjustment, the resulting map is filtered again to remove unstable or poorly reconstructed landmarks.
 
-A landmark is preserved only if:
+In the initial version of the project, this filtering stage was too restrictive and removed a large portion of the triangulated landmarks. Since this is a SLAM project, the mapping component should preserve a sufficiently rich set of landmarks instead of keeping only a very small subset of highly accurate points.
 
-- it is not too far from the origin;
-- it has enough valid observations;
-- its mean reprojection error is below a fixed threshold.
+For this reason, the post-optimization filtering strategy was made more conservative. The goal is to discard only clearly unreliable landmarks while preserving enough map structure to support the final trajectory estimation.
 
-This final filtering step reduces map density, but improves the reliability and geometric consistency of the final reconstruction.
+A landmark is preserved if:
+
+- it is numerically valid;
+- it is not geometrically implausible;
+- it has at least one valid reprojection;
+- its mean reprojection error remains below the selected threshold.
+
+This conservative filtering strategy increases the number of retained landmarks compared to the initial submitted version, while keeping the trajectory estimation stable.
 
 ---
 
@@ -454,13 +459,13 @@ The following values were obtained from the final execution of the complete pipe
 | Metric | Value |
 |---|---:|
 | Initial landmarks | 191 |
-| Final landmarks | 46 |
+| Final landmarks | 111 |
 | Translation RMSE | 0.0167 m |
 | Rotation RMSE | 0.0153 rad |
-| Map RMSE | 1.6377 m |
-| Mean reprojection error after BA | 10.617 px |
-| Median reprojection error after BA | 8.282 px |
-| Observations used after BA | 1124 |
+| Map RMSE | 1.4211 m |
+| Mean reprojection error after BA | 18.949 px |
+| Median reprojection error after BA | 10.655 px |
+| Observations used after BA | 3130 |
 | Absolute trajectory RMSE after SE(2) alignment | 0.4697 m |
 
 ---
@@ -472,18 +477,20 @@ The results show that the Bundle Adjustment stage improves the trajectory estima
 
 The odometry provides a noisy but useful initial guess. Bundle Adjustment then refines this estimate by combining odometry constraints with visual reprojection constraints.
 
-The final trajectory is smoother and more consistent with the ground truth, while the final landmark map is sparse but geometrically meaningful.
+Compared to the initial submitted version, the post-optimization landmark filtering was made more conservative in order to avoid excessive landmark rejection. The final system retains 111 landmarks out of 191 initially triangulated landmarks, preserving approximately 58% of the initial map.
 
-The number of retained landmarks may be lower than the number of initially triangulated landmarks. This is expected because the pipeline applies conservative filtering before and after optimization.
+This improves the mapping component while keeping the trajectory estimation stable. The final trajectory remains close to the ground truth, as shown by the translation RMSE, rotation RMSE and absolute trajectory RMSE values.
 
-This behavior represents a trade-off between:
+The final landmark map is still sparse, but it is no longer excessively reduced. This represents a trade-off between:
 
 - map density;
 - map reliability;
 - reprojection consistency;
 - numerical stability.
 
-The map RMSE can remain larger than the pose RMSE because monocular triangulation is especially sensitive to:
+The mean reprojection error is higher than the median reprojection error. This difference suggests that most observations remain reasonably consistent, while a smaller number of higher-error observations still affects the mean value. For this reason, both mean and median reprojection errors are reported.
+
+The map RMSE remains larger than the trajectory error, which is expected because monocular triangulation is sensitive to:
 
 - baseline quality;
 - image noise;
@@ -491,7 +498,7 @@ The map RMSE can remain larger than the pose RMSE because monocular triangulatio
 - geometric degeneracies;
 - inaccurate initial depth estimation.
 
-Overall, the implemented system successfully performs the complete Planar Monocular SLAM pipeline required by the assignment.
+Overall, the implemented system successfully performs the complete Planar Monocular SLAM pipeline required by the assignment. The final version preserves a larger portion of the reconstructed map while maintaining a stable and accurate trajectory estimate.
 
 ---
 
