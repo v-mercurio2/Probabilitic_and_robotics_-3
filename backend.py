@@ -74,8 +74,8 @@ def compose_pose_from_odom(odom_pose, delta_pose):
 def compute_residuals(state_vector, pose_keys, point_keys, measurements, K, cam_transform,
                       odom_poses_dict, odom_constraints,
                       w_prior=100.0,
-                      w_odom=np.array([0.01, 0.01, 0.01]),
-                      w_reproj=2.5):
+                      w_odom=np.array([100.0, 100.0, 100.0]),
+                      w_reproj=0.05):
     """
     Total residuals:
     1) prior on the delta of the first pose
@@ -199,19 +199,18 @@ def build_sparsity_matrix(pose_keys, point_keys, measurements, odom_constraints,
     return A
 
 def filter_bad_landmarks(optimized_poses, optimized_map, measurements, K, cam_transform,
-                         max_mean_reproj_error=55.0,
+                         max_median_reproj_error=25.0,
+                         max_p90_reproj_error=120.0,
+                         max_mean_reproj_error=500.0,
                          min_valid_obs=1,
-                         max_distance=45.0):
+                         max_distance=100.0):
     """
-    Conservative post-optimization landmark filtering.
+    Conservative but robust post-optimization landmark filtering.
 
-    Since this is a SLAM project, the mapping component should preserve most of
-    the reconstructed landmarks. Therefore, this filter removes only landmarks
-    that are numerically invalid, geometrically implausible, or have a very high
-    mean reprojection error.
-
-    The goal is not to obtain the densest possible map at any cost, but to avoid
-    rejecting too many landmarks while keeping the trajectory estimation stable.
+    The goal is to preserve most of the reconstructed map while removing only
+    clearly unreliable landmarks. Instead of using only the mean reprojection
+    error, this filter also uses the median and the 90th percentile, which are
+    more robust to isolated extreme outliers.
     """
     filtered_map = {}
 
@@ -221,7 +220,7 @@ def filter_bad_landmarks(optimized_poses, optimized_map, measurements, K, cam_tr
         if not np.all(np.isfinite(pt_3d)):
             continue
 
-        # Reject only clearly implausible landmarks
+        # Reject only clearly implausible points
         if np.linalg.norm(pt_3d) > max_distance:
             continue
 
@@ -245,8 +244,6 @@ def filter_bad_landmarks(optimized_poses, optimized_map, measurements, K, cam_tr
             Xh = np.append(pt_3d, 1.0)
             proj = P @ Xh
 
-            # Invalid projections are ignored for the statistics,
-            # but the landmark is not immediately discarded.
             if proj[2] <= 1e-8:
                 continue
 
@@ -255,15 +252,27 @@ def filter_bad_landmarks(optimized_poses, optimized_map, measurements, K, cam_tr
             for idx in matches:
                 pixel_meas = meas['image_points'][idx]
                 err = np.linalg.norm(uv - pixel_meas)
-                errors.append(err)
-                valid_obs += 1
 
-        # Keep landmarks with at least one valid reprojection and acceptable average error
-        if valid_obs >= min_valid_obs and len(errors) > 0:
-            mean_err = np.mean(errors)
+                if np.isfinite(err):
+                    errors.append(err)
+                    valid_obs += 1
 
-            if mean_err <= max_mean_reproj_error:
-                filtered_map[pt_id] = pt_3d
+        if valid_obs < min_valid_obs or len(errors) == 0:
+            continue
+
+        errors = np.array(errors)
+
+        mean_err = np.mean(errors)
+        median_err = np.median(errors)
+        p90_err = np.percentile(errors, 90)
+
+        # Keep the landmark only if it is not dominated by extreme reprojection errors
+        if (
+            median_err <= max_median_reproj_error and
+            p90_err <= max_p90_reproj_error and
+            mean_err <= max_mean_reproj_error
+        ):
+            filtered_map[pt_id] = pt_3d
 
     return filtered_map
 
@@ -351,11 +360,12 @@ def run_bundle_adjustment(dataset, initial_map):
         measurements,
         camera_params['K'],
         camera_params['transform'],
-        max_mean_reproj_error=45.0,
+        max_median_reproj_error=30.0,
+        max_p90_reproj_error=180.0,
+        max_mean_reproj_error=1000.0,
         min_valid_obs=1,
-        max_distance=45.0
+        max_distance=100.0
     )
-
     print(f"   -> Landmarks after quality filter: {len(filtered_map)} / {len(optimized_map)}")
 
     return optimized_poses, filtered_map

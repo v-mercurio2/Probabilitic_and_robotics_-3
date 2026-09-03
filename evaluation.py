@@ -240,7 +240,6 @@ def plot_results(optimized_poses, gt_poses_dict, optimized_map, world_map, odom_
     if save_path is not None:
         plt.savefig(save_path, dpi=300)
         print(f"   -> Results plot saved as: {save_path}")
-    plt.show()
 
 def compute_reprojection_stats(poses_dict, points_dict, measurements, K, cam_transform):
     errors = []

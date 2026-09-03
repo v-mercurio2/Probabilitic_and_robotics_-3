@@ -114,7 +114,7 @@ def run_bootstrap(dataset):
         err1 = np.linalg.norm(uv1 - pixel1)
         err2 = np.linalg.norm(uv2 - pixel2)
 
-        if err1 > 3.0 or err2 > 3.0:
+        if err1 > 4.0 or err2 > 4.0:
             continue
 
         initial_map[pt_id] = X_3d

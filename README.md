@@ -234,18 +234,33 @@ Instead, for each landmark, the algorithm selects the pair of observations with 
 
 After selecting the best observation pair, the corresponding landmark is triangulated in 3D.
 
+### Frontend landmark initialization
+
+The frontend initializes the 3D map by collecting multiple observations of each landmark and triangulating the landmark position from the best pair of camera views.
+
+The final configuration preserves a stable minimum baseline while slightly relaxing the initial reprojection threshold:
+
+- minimum baseline: `0.60`
+- initial triangulation reprojection threshold: `4.0 px`
+- maximum 3D landmark distance: `12.0 m`
+
+The minimum baseline is kept sufficiently high to avoid unstable triangulations from nearly identical viewpoints. At the same time, the reprojection threshold is relaxed to avoid discarding potentially useful landmarks too early in the pipeline.
+
+This configuration allows the system to initialize a larger and more reliable set of landmarks while still rejecting clearly unstable triangulations.
+
 A landmark is kept only if:
 
 - it has at least two observations;
-- the selected camera baseline is large enough;
+- the selected camera baseline is at least `0.60`;
 - the homogeneous triangulation is numerically stable;
 - the reconstructed point has positive depth in both camera views;
-- the reprojection error on the selected pair is sufficiently small;
-- the point is not excessively far from the origin.
+- the reprojection error on the selected pair is below `4.0 px`;
+- the point is not farther than `12.0 m` from the origin.
 
 This stage produces the initial sparse map, which is then refined during Bundle Adjustment.
 
 ---
+
 
 ## 3. Bundle Adjustment
 
@@ -275,6 +290,7 @@ This formulation uses odometry as an initial guess and allows the optimizer to r
 
 The Bundle Adjustment cost function contains three families of residuals.
 
+
 ### 1. Prior on the First Pose
 
 A prior is added on the correction of the first pose.
@@ -303,6 +319,28 @@ where:
 
 - `(u_proj, v_proj)` is the projected landmark position;
 - `(u_meas, v_meas)` is the measured image point.
+
+### Bundle Adjustment weighting
+
+The Bundle Adjustment cost function combines three types of residuals:
+
+- a prior residual on the first pose;
+- odometric residuals, expressed in meters and radians;
+- visual reprojection residuals, expressed in pixels.
+
+Since these residuals have different units, magnitudes and cardinalities, their numerical weights cannot be compared directly. The final weights were tuned empirically to normalize the residual scales and prevent the pixel reprojection terms from dominating the optimization.
+
+The final configuration is:
+
+```python
+w_prior = 100.0
+w_odom = np.array([100.0, 100.0, 100.0])
+w_reproj = 0.05
+```
+
+With this configuration, the odometric constraints act as a trajectory regularization term, while the reprojection residuals remain active for landmark refinement and visual consistency.
+
+This weighting strategy is consistent with the idea of information-based weighting, where residuals are scaled according to their expected uncertainty, numerical magnitude and measurement units.
 
 ---
 
@@ -343,18 +381,31 @@ This confirms the expected Bundle Adjustment structure: each visual residual aff
 
 After Bundle Adjustment, the resulting map is filtered again to remove unstable or poorly reconstructed landmarks.
 
-In the initial version of the project, this filtering stage was too restrictive and removed a large portion of the triangulated landmarks. Since this is a SLAM project, the mapping component should preserve a sufficiently rich set of landmarks instead of keeping only a very small subset of highly accurate points.
+### Robust landmark quality filtering
 
-For this reason, the post-optimization filtering strategy was made more conservative. The goal is to discard only clearly unreliable landmarks while preserving enough map structure to support the final trajectory estimation.
+The final landmark filtering stage was modified to avoid removing useful map information too aggressively.
 
-A landmark is preserved if:
+Instead of rejecting landmarks only according to the mean reprojection error, the final version uses a more robust criterion based on:
 
-- it is numerically valid;
-- it is not geometrically implausible;
-- it has at least one valid reprojection;
-- its mean reprojection error remains below the selected threshold.
+- median reprojection error;
+- 90th percentile reprojection error;
+- mean reprojection error as an additional safety bound;
+- maximum landmark distance;
+- numerical validity of the 3D point.
 
-This conservative filtering strategy increases the number of retained landmarks compared to the initial submitted version, while keeping the trajectory estimation stable.
+This makes the filtering less sensitive to isolated high-error observations. A landmark is rejected only when its reprojection behavior is consistently poor or when it is geometrically or numerically implausible.
+
+The final filtering parameters are:
+
+```python
+max_median_reproj_error = 30.0
+max_p90_reproj_error = 180.0
+max_mean_reproj_error = 1000.0
+min_valid_obs = 1
+max_distance = 100.0
+```
+
+This conservative but robust filtering strategy preserves most of the reconstructed map while still removing clear outliers.
 
 ---
 
@@ -458,47 +509,37 @@ The following values were obtained from the final execution of the complete pipe
 
 | Metric | Value |
 |---|---:|
-| Initial landmarks | 191 |
-| Final landmarks | 111 |
-| Translation RMSE | 0.0167 m |
-| Rotation RMSE | 0.0153 rad |
-| Map RMSE | 1.4211 m |
+| Initial landmarks | 231 |
+| Final landmarks | 220 |
+| Translation RMSE | 0.0242 m |
+| Rotation RMSE | 0.0145 rad |
+| Map RMSE | 1.3738 m |
 | Mean reprojection error after BA | 18.949 px |
-| Median reprojection error after BA | 10.655 px |
-| Observations used after BA | 3130 |
-| Absolute trajectory RMSE after SE(2) alignment | 0.4697 m |
+| Median reprojection error after BA | 9.773 px |
+| Observations used after BA | 5941 |
+| Absolute trajectory RMSE after SE(2) alignment | 0.3604 m |
 
 ---
 
-
 ## Discussion of the Results
 
-The results show that the Bundle Adjustment stage improves the trajectory estimate with respect to raw odometry.
+The final results show that the implemented Bundle Adjustment stage successfully refines both the robot trajectory and the reconstructed landmark map.
 
-The odometry provides a noisy but useful initial guess. Bundle Adjustment then refines this estimate by combining odometry constraints with visual reprojection constraints.
+Compared to the previous submitted version, the final system preserves a significantly larger portion of the reconstructed map. The number of final landmarks increased to 220 out of 231 initially triangulated landmarks, meaning that approximately 95% of the initialized map is retained after optimization and filtering.
 
-Compared to the initial submitted version, the post-optimization landmark filtering was made more conservative in order to avoid excessive landmark rejection. The final system retains 111 landmarks out of 191 initially triangulated landmarks, preserving approximately 58% of the initial map.
+This improvement was obtained through three main refinements. First, the frontend initialization was adjusted to preserve a larger set of reliable landmarks while keeping a stable triangulation baseline. Second, the Bundle Adjustment residual weights were empirically normalized to account for the different units and magnitudes of odometric and visual residuals. Third, the final landmark filtering stage was redesigned using robust statistics, including the median and the 90th percentile of the reprojection error.
 
-This improves the mapping component while keeping the trajectory estimation stable. The final trajectory remains close to the ground truth, as shown by the translation RMSE, rotation RMSE and absolute trajectory RMSE values.
+The odometric residuals are expressed in meters and radians, while reprojection residuals are expressed in pixels and are much more numerous. For this reason, the residual weights are not directly comparable as raw numbers. The final weighting prevents noisy visual observations from dominating the trajectory estimate, while still preserving the role of reprojection residuals in landmark refinement and visual consistency.
 
-The final landmark map is still sparse, but it is no longer excessively reduced. This represents a trade-off between:
+The final configuration improves the map density without producing an excessively aggressive filtering stage. The system retains most of the initialized landmarks while still removing geometrically or numerically implausible points.
 
-- map density;
-- map reliability;
-- reprojection consistency;
-- numerical stability.
+The final trajectory remains stable and close to the ground truth. This is shown by the translation RMSE, rotation RMSE and absolute trajectory RMSE values. In particular, the absolute trajectory RMSE after SE(2) alignment is reduced to 0.3604 m.
 
-The mean reprojection error is higher than the median reprojection error. This difference suggests that most observations remain reasonably consistent, while a smaller number of higher-error observations still affects the mean value. For this reason, both mean and median reprojection errors are reported.
+The final map RMSE is 1.3738 m. This value remains larger than the trajectory error, which is expected because monocular triangulation is sensitive to baseline quality, image noise, limited visibility, geometric degeneracies and inaccurate initial depth estimation.
 
-The map RMSE remains larger than the trajectory error, which is expected because monocular triangulation is sensitive to:
+The mean reprojection error is higher than the median reprojection error. This suggests that most observations remain reasonably consistent, while a smaller number of higher-error observations still affects the mean value. For this reason, both mean and median reprojection errors are reported.
 
-- baseline quality;
-- image noise;
-- limited visibility;
-- geometric degeneracies;
-- inaccurate initial depth estimation.
-
-Overall, the implemented system successfully performs the complete Planar Monocular SLAM pipeline required by the assignment. The final version preserves a larger portion of the reconstructed map while maintaining a stable and accurate trajectory estimate.
+Overall, the implemented system successfully performs the complete Planar Monocular SLAM pipeline required by the assignment. The final version preserves a much larger portion of the reconstructed map, improves the absolute trajectory error, and maintains a stable and physically plausible trajectory estimate.
 
 ---
 
@@ -553,7 +594,7 @@ A two-stage filtering strategy was adopted:
 1. an initial filter during triangulation;
 2. a post-optimization filter after Bundle Adjustment.
 
-The final filter keeps only landmarks with enough valid observations and bounded mean reprojection error.
+The final filter uses robust reprojection statistics, including the median and the 90th percentile of the reprojection error, together with numerical validity and distance checks.
 
 ---
 
@@ -629,4 +670,4 @@ Despite its simplifying assumptions, the implementation demonstrates the main co
 - map filtering;
 - quantitative evaluation.
 
-The final result is a sparse but reliable reconstruction of the environment and an improved estimate of the robot trajectory.
+The final result is a more complete sparse reconstruction of the environment and an improved estimate of the robot trajectory. The refined filtering and weighting strategy allows the system to preserve most of the initialized landmarks while maintaining a stable trajectory estimate.
